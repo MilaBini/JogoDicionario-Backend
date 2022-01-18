@@ -5,7 +5,7 @@ npm-debug.log*
 
 # Dependency directories
 node_modules/
-planning_files/
+planning/
 
 # Optional npm cache directory
 .npm
@@ -14,3 +14,4 @@ planning_files/
 .env
 .env.test
 .env.production
+

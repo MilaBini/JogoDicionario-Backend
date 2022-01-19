@@ -6,6 +6,7 @@ npm-debug.log*
 # Dependency directories
 node_modules/
 planning/
+token/
 
 # Optional npm cache directory
 .npm

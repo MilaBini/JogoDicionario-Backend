@@ -9,7 +9,7 @@ var secretRoomInfo = {};
 
 
 //#region Firestore Config
-const serviceAccount = require('./jogo-dicionario-firebase-adminsdk-a4gm6-5a9e5f8b5b.json');
+const serviceAccount = require('./token/jogo-dicionario-firebase-adminsdk-a4gm6-5a9e5f8b5b.json');
 const { firestore } = require("firebase-admin");
 admin.initializeApp({
 	credential: admin.credential.cert(serviceAccount)

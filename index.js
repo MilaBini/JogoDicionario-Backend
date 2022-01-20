@@ -9,7 +9,18 @@ var secretRoomInfo = {};
 
 
 //#region Firestore Config
-const serviceAccount = require('./token/jogo-dicionario-firebase-adminsdk-a4gm6-5a9e5f8b5b.json');
+const serviceAccount = {
+	type: "service_account",
+	project_id: process.env.FIREBASE_KEY_project_id,
+	private_key_id: process.env.FIREBASE_KEY_private_key_id,
+	private_key: process.env.FIREBASE_KEY_private_key,
+	client_email: process.env.FIREBASE_KEY_client_email,
+	client_id: process.env.FIREBASE_KEY_client_id,
+	auth_uri: "https://accounts.google.com/o/oauth2/auth",
+	token_uri: "https://oauth2.googleapis.com/token",
+	auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+	client_x509_cert_url: process.env.FIREBASE_KEY_client_x509_cert_url
+};
 const { firestore } = require("firebase-admin");
 admin.initializeApp({
 	credential: admin.credential.cert(serviceAccount)
@@ -20,30 +31,46 @@ const db = admin.firestore();
 //#region Firestore Objects Keeper
 var users = [];
 db.collection('users').onSnapshot(snapshot => {
-	var change = snapshot.docChanges()[0];
-	if (change.type == 'modified') {
-		const modifiedUser = { ...change.doc.data(), id: change.doc.id };
-		const roomsToModify = rooms.filter(r => r.users.find(u => u.hash == md5(modifiedUser.id)));
+	try {
+		var change = snapshot.docChanges()[0];
+		if (change.type == 'modified') {
+			const modifiedUser = { ...change.doc.data(), id: change.doc.id };
+			const roomsToModify = rooms.filter(r => r.users.find(u => u.hash == md5(modifiedUser.id)) || r.messages.find(m => m.userHash == md5(modifiedUser.id)));
 
-		roomsToModify.forEach(r => {
-			const modifiedRoomUsers = r.users.map(u => {
-				if (u.hash == md5(modifiedUser.id)) {
-					return {
-						...u,
-						name: modifiedUser.name,
-						imgUrl: modifiedUser.imgUrl
+			roomsToModify.forEach(r => {
+				const modifiedRoomUsers = r.users.map(u => {
+					if (u.hash == md5(modifiedUser.id)) {
+						return {
+							...u,
+							name: modifiedUser.name,
+							imgUrl: modifiedUser.imgUrl
+						}
 					}
-				}
-				return u;
+					return u;
+				})
+				const modifiedRoomMessages = r.messages.map(m => {
+					if (m.userHash == md5(modifiedUser.id)) {
+						return {
+							...m,
+							userName: modifiedUser.name,
+							userImgUrl: modifiedUser.imgUrl
+						}
+					}
+					return m;
+				})
+				db.collection('rooms').doc(r.id).update({
+					users: modifiedRoomUsers,
+					messages: modifiedRoomMessages
+				})
 			})
-			db.collection('rooms').doc(r.id).update({
-				users: modifiedRoomUsers
-			})
+		}
+		users = snapshot.docs.map(doc => {
+			return { id: doc.id, ...doc.data() };
 		})
 	}
-	users = snapshot.docs.map(doc => {
-		return { id: doc.id, ...doc.data() };
-	})
+	catch (ex) {
+		console.error(ex)
+	}
 });
 var rooms = [];
 db.collection('rooms').onSnapshot(snapshot => {
@@ -174,6 +201,40 @@ app.post('/keep-active', (req, res) => {
 	});
 
 	return res.json({ msg: 'user updated' })
+
+})
+app.post('/room/chat/message', (req, res) => {
+
+	const { roomId, userId, text } = req.body;
+
+	keepActive(roomId, userId);
+
+	if (!roomId || !userId || !text) return res.status(400).json({ msg: 'missing user, room or text' });
+
+	const user = users.find(u => u.id == userId);
+	if (!user) return res.status(400).json({ msg: 'user not found' });
+
+	const room = rooms.find(r => r.id == roomId);
+	if (!room) return res.status(400).json({ msg: 'room not found' });
+
+	var userInRoom = room.users.find(u => u.hash == md5(userId));
+	if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
+
+	var repWords = [{ bad: '(idiota|burro|desgracado|desgraçado)', good: 'néscio' }, { bad: 'burra|desgraçada|desgracada', good: 'néscia' }, { bad: 'puta', good: 'meretriz' }, { bad: '(merda|bosta)', good: 'fezes' }, { bad: 'foder', good: 'danar' }, { bad: 'fode', good: 'dana' }, { bad: 'foda', good: 'dane' }, { bad: '(cu|cú|cuzão|cuzao)', good: 'orifício' }]
+	var improvedText = text
+	for (let w of repWords) improvedText = improvedText.replace(new RegExp(`(?<=^|\\W)${w.bad}(?=$|\\W)`, 'gmi'), w.good)
+
+	db.collection('rooms').doc(roomId).update({
+		messages: firestore.FieldValue.arrayUnion({
+			userHash: md5(userId),
+			userName: user.name,
+			userImgUrl: user.imgUrl,
+			text: improvedText,
+			sentAt: firestore.Timestamp.now()
+		})
+	})
+
+	return res.json({ msg: 'message sent' })
 
 })
 app.post('/room/definition', (req, res) => {
@@ -398,8 +459,8 @@ setInterval(() => {
 
 	for (let room of rooms) {
 		const MAX_TIME_STEP_AVG = (room.maxTimeStep1 + room.maxTimeStep2) / 2;
-		const INACTIVE_TIME = new Date().getTime() - (1000 * MAX_TIME_STEP_AVG * 2);
-		const KICK_TIME = new Date().getTime() - (1000 * MAX_TIME_STEP_AVG * 4);
+		const INACTIVE_TIME = new Date().getTime() - (1000 * MAX_TIME_STEP_AVG * 5);
+		const KICK_TIME = INACTIVE_TIME - (1000 * MAX_TIME_STEP_AVG * 2);
 
 		// Se a sala está vazia, é deletada
 		if (room.users.length <= 0) {

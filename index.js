@@ -136,12 +136,12 @@ app.post('/room/enter', (req, res) => {
 	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
 
 	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+	if (!user) return res.status(400).json({ msg: 'Usuário não encontrado' });
 
 	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+	if (!room) return res.status(400).json({ msg: 'Sala não encontrada' });
 
-	if (room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'user already in' });
+	if (room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'Usuário já está dentro da sala' });
 
 	db.collection('rooms').doc(roomId).update({
 		users: firestore.FieldValue.arrayUnion({
@@ -154,35 +154,35 @@ app.post('/room/enter', (req, res) => {
 		})
 	});
 
-	return res.json({ msg: 'user added' })
+	return res.json({ msg: 'Usuario adicionado' })
 
 })
 app.post('/room/leave', (req, res) => {
 
 	const { roomId, userId } = req.body;
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
+	if (!roomId || !userId) return res.status(400).json({ msg: 'Faltando sala ou usuario' });
 
 	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+	if (!user) return res.status(400).json({ msg: 'Usuário não encontrado' });
 
 	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+	if (!room) return res.status(400).json({ msg: 'Sala não encontrada' });
 
-	if (!room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'user not in this room' });
+	if (!room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'Usuário não está na sala' });
 
 	var usersModified = room.users.filter(u => u.hash != md5(userId))
 
 	db.collection('rooms').doc(roomId).update({ users: usersModified });
 
-	return res.json({ msg: 'user removed' })
+	return res.json({ msg: 'Usuario Removido' })
 
 })
 app.post('/keep-active', (req, res) => {
 
 	const { roomId, userId } = req.body;
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
+	if (!roomId || !userId) return res.status(400).json({ msg: 'Faltando usuario ou sala' });
 
 	const user = users.find(u => u.id == userId);
 	if (!user) return res.status(400).json({ msg: 'user not found' });
@@ -220,7 +220,7 @@ app.post('/room/chat/message', (req, res) => {
 	var userInRoom = room.users.find(u => u.hash == md5(userId));
 	if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
 
-	var repWords = [{ bad: '(idiota|burro|desgracado|desgraçado)', good: 'néscio' }, { bad: 'burra|desgraçada|desgracada', good: 'néscia' }, { bad: 'puta', good: 'meretriz' }, { bad: '(merda|bosta)', good: 'fezes' }, { bad: 'foder', good: 'danar' }, { bad: 'fode', good: 'dana' }, { bad: 'foda', good: 'dane' }, { bad: '(cu|cú|cuzão|cuzao)', good: 'orifício' }]
+	var repWords = [{ bad: '(idiota|burro|desgracado|desgraçado|maldito|retardado)', good: 'néscio' }, { bad: 'burra|desgraçada|desgracada|maldita|retardada', good: 'néscia' }, { bad: '(puta|pulta)', good: 'meretriz' }, { bad: '(merda|bosta)', good: 'fezes' }, { bad: 'foder', good: 'danar' }, { bad: 'fode', good: 'dana' }, { bad: 'foda', good: 'dane' }, { bad: '(cu|cú|cuzão|cuzao)', good: 'orifício' }, { bad: '(caralho|karalho|caaaralho|porra|poha|cacete)', good: 'caramba' }, { bad: '(viado|gay|bicha|bixa|boiola)', good: 'homossexual' }, { bad: 'buceta', good: 'vagina' }, { bad: '(putz|pultz|piltz|patz)', good: 'fillds' }]
 	var improvedText = text
 	for (let w of repWords) improvedText = improvedText.replace(new RegExp(`(?<=^|\\W)${w.bad}(?=$|\\W)`, 'gmi'), w.good)
 
@@ -245,6 +245,8 @@ app.post('/room/definition', (req, res) => {
 
 	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
 
+	if (text.length > 240) return res.status(400).json({ msg: 'Definição muito grande!' });
+
 	const user = users.find(u => u.id == userId);
 	if (!user) return res.status(400).json({ msg: 'user not found' });
 
@@ -259,7 +261,7 @@ app.post('/room/definition', (req, res) => {
 	if (!secretRoomInfo[roomId].definitions) secretRoomInfo[roomId].definitions = [];
 	if (!secretRoomInfo[roomId].votes) secretRoomInfo[roomId].votes = [];
 
-	if (secretRoomInfo[roomId].definitions.find(d => d.userId == userId)) return res.status(400).json({ msg: 'user already defined' });
+	if (secretRoomInfo[roomId].definitions.find(d => d.userId == userId)) return res.status(400).json({ msg: 'Você já enviou uma definição!' });
 
 	secretRoomInfo[roomId].definitions.push({
 		userName: user.name,
@@ -305,7 +307,7 @@ app.post('/room/vote', (req, res) => {
 
 	if (!secretRoomInfo[roomId].votes) secretRoomInfo[roomId].votes = [];
 
-	if (secretRoomInfo[roomId].votes.find(v => v.voterUserId == userId)) return res.status(400).json({ msg: 'user already voted' });
+	if (secretRoomInfo[roomId].votes.find(v => v.voterUserId == userId)) return res.status(400).json({ msg: 'Você já votou!' });
 
 	if (secretRoomInfo[roomId].definitions.find(d => d.text == text && d.userId == userId)) return res.status(400).json({ msg: 'cannot vote on your self' });
 
@@ -340,6 +342,37 @@ app.post('/room/vote', (req, res) => {
 	}
 
 	return res.json({ msg: 'voted' })
+
+})
+app.post('/room/claim-host', (req, res) => {
+
+	const { roomId, userId, password } = req.body;
+
+	if (password != "123") return res.status(400).json({ msg: 'wrong password' });
+
+	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room ' });
+
+	const user = users.find(u => u.id == userId);
+	if (!user) return res.status(400).json({ msg: 'user not found' });
+
+	const room = rooms.find(r => r.id == roomId);
+	if (!room) return res.status(400).json({ msg: 'room not found' });
+
+	var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
+	if (userInRoomIndex == -1) return res.status(400).json({ msg: 'user is not in this room' });
+
+	if (userInRoomIndex == 0) return res.status(400).json({ msg: 'already host' });
+
+	var updatedUsers = room.users;
+	var me = updatedUsers.splice(userInRoomIndex, 1);
+	updatedUsers = [
+		...me,
+		...updatedUsers
+	]
+
+	db.collection('rooms').doc(roomId).update({ users: updatedUsers })
+
+	return res.json({ msg: 'claimed host' })
 
 })
 var port = process.env.PORT || 3000;

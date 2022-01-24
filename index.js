@@ -265,6 +265,7 @@ app.post('/room/definition', (req, res) => {
 
 	secretRoomInfo[roomId].definitions.push({
 		userName: user.name,
+		userImgUrl: user.imgUrl,
 		userId: user.id,
 		text: text
 	})
@@ -469,7 +470,7 @@ setInterval(() => {
 			if (nextStep == 1) nextRound++;
 			else if (nextStep == 0) nextRound = 0;
 
-			const SECONDS_TO_ADD = nextStep == 1 ? room.maxTimeStep1 : (nextStep == 2 ? room.maxTimeStep2 : 10);
+			const SECONDS_TO_ADD = nextStep == 1 ? room.maxTimeStep1 : (nextStep == 2 ? room.maxTimeStep2 : room.maxTimeStep3);
 
 			db.collection('rooms').doc(room.id).update({
 				step: nextStep,

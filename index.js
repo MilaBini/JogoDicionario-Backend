@@ -376,6 +376,28 @@ app.post('/room/claim-host', (req, res) => {
 	return res.json({ msg: 'claimed host' })
 
 })
+app.put('/room', (req, res) => {
+
+	const { id, userId, maxTimeStep1, maxTimeStep2, maxTimeStep3 } = req.body;
+
+	if (!id || !userId) return res.status(400).json({ msg: 'missing user or room ' });
+
+	const user = users.find(u => u.id == userId);
+	if (!user) return res.status(400).json({ msg: 'user not found' });
+
+	const room = rooms.find(r => r.id == id);
+	if (!room) return res.status(400).json({ msg: 'room not found' });
+
+	var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
+	if (userInRoomIndex == -1) return res.status(400).json({ msg: 'user is not in this room' });
+
+	if (userInRoomIndex != 0) return res.status(400).json({ msg: 'not host (insufficient permissions)' });
+
+	db.collection('rooms').doc(id).update({ maxTimeStep1, maxTimeStep2, maxTimeStep3 })
+
+	return res.json({ msg: 'updated' })
+
+})
 var port = process.env.PORT || 3000;
 app.listen(port, () => {
 	console.log("Server is running at port ", port);

@@ -376,6 +376,35 @@ app.post('/room/claim-host', (req, res) => {
 	return res.json({ msg: 'claimed host' })
 
 })
+app.post('/room/reset', (req, res) => {
+
+	const { roomId, userId, password } = req.body;
+
+	if (password != "123") return res.status(400).json({ msg: 'wrong password' });
+
+	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room ' });
+
+	const user = users.find(u => u.id == userId);
+	if (!user) return res.status(400).json({ msg: 'user not found' });
+
+	const room = rooms.find(r => r.id == roomId);
+	if (!room) return res.status(400).json({ msg: 'room not found' });
+
+	var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
+	if (userInRoomIndex != 0) return res.status(400).json({ msg: 'user is not host' });
+
+	var updatedUsers = room.users.map(u => {
+		return {
+			...u,
+			score: 0
+		}
+	});
+
+	db.collection('rooms').doc(roomId).update({ users: updatedUsers, step: 0, round: 0 })
+
+	return res.json({ msg: 'reset ok' })
+
+})
 app.put('/room', (req, res) => {
 
 	const { id, userId, maxTimeStep1, maxTimeStep2, maxTimeStep3 } = req.body;
@@ -514,9 +543,9 @@ setInterval(() => {
 setInterval(() => {
 
 	for (let room of rooms) {
-		const MAX_TIME_STEP_AVG = (room.maxTimeStep1 + room.maxTimeStep2) / 2;
-		const INACTIVE_TIME = new Date().getTime() - (1000 * MAX_TIME_STEP_AVG * 5);
-		const KICK_TIME = INACTIVE_TIME - (1000 * MAX_TIME_STEP_AVG * 2);
+
+		const INACTIVE_TIME = new Date().getTime() - (1000 * 60 * 5);
+		const KICK_TIME = INACTIVE_TIME - (1000 * 60 * 2);
 
 		// Se a sala está vazia, é deletada
 		if (room.users.length <= 0) {

@@ -69,6 +69,7 @@ db.collection('users').onSnapshot(snapshot => {
 		})
 	}
 	catch (ex) {
+		logError('Firestore Object Keeper', ex)
 		console.error(ex)
 	}
 });
@@ -93,7 +94,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cors());
 app.use(router);
-app.post('/room/start', (req, res) => {
+app.post('/room/start', async (req, res) => {
 	try {
 		const { roomId, userId } = req.body;
 
@@ -115,7 +116,7 @@ app.post('/room/start', (req, res) => {
 			}
 		})
 
-		db.collection('rooms').doc(roomId).update({
+		await db.collection('rooms').doc(roomId).update({
 			step: 1,
 			stepEndAt: new Date(new Date().getTime() + (1000 * room.maxTimeStep1)),
 			round: 1,
@@ -124,307 +125,343 @@ app.post('/room/start', (req, res) => {
 		})
 		res.json({ msg: 'ok', error: false })
 	}
-	catch (error) {
-		console.error(error)
-		res.status(500).json({ msg: "Conection failed: " + error, error: true });
+	catch (ex) {
+		logError('/room/start', ex)
+		res.status(500).json({ msg: "Erro no servidor", error: true });
 	};
 })
 app.post('/room/enter', (req, res) => {
+	try {
+		const { roomId, userId } = req.body;
 
-	const { roomId, userId } = req.body;
+		if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'Usuário não encontrado' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'Usuário não encontrado' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'Sala não encontrada' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'Sala não encontrada' });
+		if (room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'Usuário já está dentro da sala' });
 
-	if (room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'Usuário já está dentro da sala' });
+		db.collection('rooms').doc(roomId).update({
+			users: firestore.FieldValue.arrayUnion({
+				hash: md5(userId),
+				name: user.name,
+				imgUrl: user.imgUrl,
+				lastMoveAt: new Date(),
+				score: 0,
+				inactive: false
+			})
+		});
 
-	db.collection('rooms').doc(roomId).update({
-		users: firestore.FieldValue.arrayUnion({
-			hash: md5(userId),
-			name: user.name,
-			imgUrl: user.imgUrl,
-			lastMoveAt: new Date(),
-			score: 0,
-			inactive: false
-		})
-	});
-
-	return res.json({ msg: 'Usuario adicionado' })
-
+		return res.json({ msg: 'Usuario adicionado' })
+	}
+	catch (ex) {
+		logError('/room/enter', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 })
 app.post('/room/leave', (req, res) => {
+	try {
+		const { roomId, userId } = req.body;
 
-	const { roomId, userId } = req.body;
+		if (!roomId || !userId) return res.status(400).json({ msg: 'Faltando sala ou usuario' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'Faltando sala ou usuario' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'Usuário não encontrado' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'Usuário não encontrado' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'Sala não encontrada' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'Sala não encontrada' });
+		if (!room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'Usuário não está na sala' });
 
-	if (!room.users.find(u => u.hash == md5(userId))) return res.json({ msg: 'Usuário não está na sala' });
+		var usersModified = room.users.filter(u => u.hash != md5(userId))
 
-	var usersModified = room.users.filter(u => u.hash != md5(userId))
+		db.collection('rooms').doc(roomId).update({ users: usersModified });
 
-	db.collection('rooms').doc(roomId).update({ users: usersModified });
-
-	return res.json({ msg: 'Usuario Removido' })
-
+		return res.json({ msg: 'Usuario Removido' })
+	} catch (ex) {
+		logError('/room/leave', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 })
 app.post('/keep-active', (req, res) => {
+	try {
+		const { roomId, userId } = req.body;
 
-	const { roomId, userId } = req.body;
+		if (!roomId || !userId) return res.status(400).json({ msg: 'Faltando usuario ou sala' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'Faltando usuario ou sala' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userIndex = room.users.findIndex(u => u.hash == md5(userId));
+		if (userIndex == -1) return res.json({ msg: 'user is not in this room' });
 
-	var userIndex = room.users.findIndex(u => u.hash == md5(userId));
-	if (userIndex == -1) return res.json({ msg: 'user is not in this room' });
+		room.users[userIndex].lastMoveAt = firestore.Timestamp.now();
+		room.users[userIndex].inactive = false;
 
-	room.users[userIndex].lastMoveAt = firestore.Timestamp.now();
-	room.users[userIndex].inactive = false;
+		db.collection('rooms').doc(roomId).update({
+			users: room.users
+		});
 
-	db.collection('rooms').doc(roomId).update({
-		users: room.users
-	});
-
-	return res.json({ msg: 'user updated' })
-
+		return res.json({ msg: 'user updated' })
+	} catch (ex) {
+		logError('/keep-active', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 })
 app.post('/room/chat/message', (req, res) => {
+	try {
+		const { roomId, userId, text } = req.body;
 
-	const { roomId, userId, text } = req.body;
+		keepActive(roomId, userId);
 
-	keepActive(roomId, userId);
+		if (!roomId || !userId || !text) return res.status(400).json({ msg: 'missing user, room or text' });
 
-	if (!roomId || !userId || !text) return res.status(400).json({ msg: 'missing user, room or text' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userInRoom = room.users.find(u => u.hash == md5(userId));
+		if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
 
-	var userInRoom = room.users.find(u => u.hash == md5(userId));
-	if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
+		var repWords = [{ bad: '(idiota|burro|desgracado|desgraçado|maldito|retardado)', good: 'néscio' }, { bad: 'burra|desgraçada|desgracada|maldita|retardada', good: 'néscia' }, { bad: '(puta|pulta)', good: 'meretriz' }, { bad: '(merda|bosta)', good: 'fezes' }, { bad: 'foder', good: 'danar' }, { bad: 'fode', good: 'dana' }, { bad: 'foda', good: 'dane' }, { bad: '(cu|cú|cuzão|cuzao)', good: 'orifício' }, { bad: '(caralho|karalho|caaaralho|porra|poha|cacete)', good: 'caramba' }, { bad: '(viado|gay|bicha|bixa|boiola)', good: 'homossexual' }, { bad: 'buceta', good: 'vagina' }, { bad: '(putz|pultz|piltz|patz)', good: 'fillds' }]
+		var improvedText = text
+		for (let w of repWords) improvedText = improvedText.replace(new RegExp(`(?<=^|\\W)${w.bad}(?=$|\\W)`, 'gmi'), w.good)
 
-	var repWords = [{ bad: '(idiota|burro|desgracado|desgraçado|maldito|retardado)', good: 'néscio' }, { bad: 'burra|desgraçada|desgracada|maldita|retardada', good: 'néscia' }, { bad: '(puta|pulta)', good: 'meretriz' }, { bad: '(merda|bosta)', good: 'fezes' }, { bad: 'foder', good: 'danar' }, { bad: 'fode', good: 'dana' }, { bad: 'foda', good: 'dane' }, { bad: '(cu|cú|cuzão|cuzao)', good: 'orifício' }, { bad: '(caralho|karalho|caaaralho|porra|poha|cacete)', good: 'caramba' }, { bad: '(viado|gay|bicha|bixa|boiola)', good: 'homossexual' }, { bad: 'buceta', good: 'vagina' }, { bad: '(putz|pultz|piltz|patz)', good: 'fillds' }]
-	var improvedText = text
-	for (let w of repWords) improvedText = improvedText.replace(new RegExp(`(?<=^|\\W)${w.bad}(?=$|\\W)`, 'gmi'), w.good)
-
-	db.collection('rooms').doc(roomId).update({
-		messages: firestore.FieldValue.arrayUnion({
-			userHash: md5(userId),
-			userName: user.name,
-			userImgUrl: user.imgUrl,
-			text: improvedText,
-			sentAt: firestore.Timestamp.now()
+		db.collection('rooms').doc(roomId).update({
+			messages: firestore.FieldValue.arrayUnion({
+				userHash: md5(userId),
+				userName: user.name,
+				userImgUrl: user.imgUrl,
+				text: improvedText,
+				sentAt: firestore.Timestamp.now()
+			})
 		})
-	})
 
-	return res.json({ msg: 'message sent' })
-
+		return res.json({ msg: 'message sent' })
+	} catch (ex) {
+		logError('/room/chat/message', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 })
 app.post('/room/definition', (req, res) => {
+	try {
+		const { roomId, userId, text } = req.body;
 
-	const { roomId, userId, text } = req.body;
+		keepActive(roomId, userId);
 
-	keepActive(roomId, userId);
+		if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
+		if (text.length > 240) return res.status(400).json({ msg: 'Definição muito grande!' });
 
-	if (text.length > 240) return res.status(400).json({ msg: 'Definição muito grande!' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userInRoom = room.users.find(u => u.hash == md5(userId));
+		if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
 
-	var userInRoom = room.users.find(u => u.hash == md5(userId));
-	if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
+		if (!secretRoomInfo[roomId]) secretRoomInfo[roomId] = {};
 
-	if (!secretRoomInfo[roomId]) secretRoomInfo[roomId] = {};
+		if (!secretRoomInfo[roomId].definitions) secretRoomInfo[roomId].definitions = [];
+		if (!secretRoomInfo[roomId].votes) secretRoomInfo[roomId].votes = [];
 
-	if (!secretRoomInfo[roomId].definitions) secretRoomInfo[roomId].definitions = [];
-	if (!secretRoomInfo[roomId].votes) secretRoomInfo[roomId].votes = [];
+		if (secretRoomInfo[roomId].definitions.find(d => d.userId == userId)) return res.status(400).json({ msg: 'Você já enviou uma definição!' });
 
-	if (secretRoomInfo[roomId].definitions.find(d => d.userId == userId)) return res.status(400).json({ msg: 'Você já enviou uma definição!' });
-
-	secretRoomInfo[roomId].definitions.push({
-		userName: user.name,
-		userImgUrl: user.imgUrl,
-		userId: user.id,
-		text: text
-	})
-
-	if (text == getRightWordDefinition(room.word)) {
-		secretRoomInfo[roomId].votes.push({
-			scoredUserId: userId,
-			votedUserName: 'Definição Correta',
-			voterUserId: userId,
-			voterUserName: user.name,
-			voterUserImgUrl: user.imgUrl,
-			score: 3
+		secretRoomInfo[roomId].definitions.push({
+			userName: user.name,
+			userImgUrl: user.imgUrl,
+			userId: user.id,
+			text: text
 		})
-		return res.json({ msg: 'definition is correct!!', correctDefinition: true })
+
+		if (text == getRightWordDefinition(room.word)) {
+			secretRoomInfo[roomId].votes.push({
+				scoredUserId: userId,
+				votedUserName: 'Definição Correta',
+				voterUserId: userId,
+				voterUserName: user.name,
+				voterUserImgUrl: user.imgUrl,
+				score: 3
+			})
+			return res.json({ msg: 'definition is correct!!', correctDefinition: true })
+		}
+
+		return res.json({ msg: 'definition created' })
+	} catch (ex) {
+		logError('/room/definition', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
 	}
-
-	return res.json({ msg: 'definition created' })
-
 })
 app.post('/room/vote', (req, res) => {
+	try {
+		const { roomId, userId, text } = req.body;
 
-	const { roomId, userId, text } = req.body;
+		keepActive(roomId, userId);
 
-	keepActive(roomId, userId);
+		if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userInRoom = room.users.find(u => u.hash == md5(userId));
+		if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
 
-	var userInRoom = room.users.find(u => u.hash == md5(userId));
-	if (!userInRoom) return res.status(400).json({ msg: 'user is not in this room' });
+		if (!secretRoomInfo[roomId]) secretRoomInfo[roomId] = {};
 
-	if (!secretRoomInfo[roomId]) secretRoomInfo[roomId] = {};
+		if (!secretRoomInfo[roomId].definitions) secretRoomInfo[roomId].definitions = [];
 
-	if (!secretRoomInfo[roomId].definitions) secretRoomInfo[roomId].definitions = [];
+		if (!secretRoomInfo[roomId].votes) secretRoomInfo[roomId].votes = [];
 
-	if (!secretRoomInfo[roomId].votes) secretRoomInfo[roomId].votes = [];
+		if (secretRoomInfo[roomId].votes.find(v => v.voterUserId == userId)) return res.status(400).json({ msg: 'Você já votou!' });
 
-	if (secretRoomInfo[roomId].votes.find(v => v.voterUserId == userId)) return res.status(400).json({ msg: 'Você já votou!' });
+		if (secretRoomInfo[roomId].definitions.find(d => d.text == text && d.userId == userId)) return res.status(400).json({ msg: 'cannot vote on your self' });
 
-	if (secretRoomInfo[roomId].definitions.find(d => d.text == text && d.userId == userId)) return res.status(400).json({ msg: 'cannot vote on your self' });
+		var definitionsVoted = secretRoomInfo[roomId].definitions.filter(d => d.text == text);
 
-	var definitionsVoted = secretRoomInfo[roomId].definitions.filter(d => d.text == text);
-
-	if (definitionsVoted.length <= 0) return res.status(400).json({ msg: 'definition not found' });
+		if (definitionsVoted.length <= 0) return res.status(400).json({ msg: 'definition not found' });
 
 
-	if (text == getRightWordDefinition(room.word)) {
-		secretRoomInfo[roomId].votes.push({
-			scoredUserId: userId,
-			votedUserName: 'Definição Correta',
-			voterUserId: userId,
-			voterUserName: user.name,
-			voterUserImgUrl: user.imgUrl,
-			score: 1
-		})
-		db.collection('pt_BR_words').doc(room.word).update({ views: firestore.FieldValue.increment(1) })
-	}
-	else {
-		definitionsVoted.forEach(d => {
+		if (text == getRightWordDefinition(room.word)) {
 			secretRoomInfo[roomId].votes.push({
-				scoredUserId: d.userId,
-				votedUserName: d.userName,
+				scoredUserId: userId,
+				votedUserName: 'Definição Correta',
 				voterUserId: userId,
 				voterUserName: user.name,
 				voterUserImgUrl: user.imgUrl,
 				score: 1
 			})
-			db.collection('pt_BR_words').doc(room.word).update({ views: firestore.FieldValue.increment(1), mistakes: firestore.FieldValue.increment(1) })
-		})
+			db.collection('pt_BR_words').doc(room.word).update({ views: firestore.FieldValue.increment(1) })
+		}
+		else {
+			definitionsVoted.forEach(d => {
+				secretRoomInfo[roomId].votes.push({
+					scoredUserId: d.userId,
+					votedUserName: d.userName,
+					voterUserId: userId,
+					voterUserName: user.name,
+					voterUserImgUrl: user.imgUrl,
+					score: 1
+				})
+				db.collection('pt_BR_words').doc(room.word).update({ views: firestore.FieldValue.increment(1), mistakes: firestore.FieldValue.increment(1) })
+			})
+		}
+
+		return res.json({ msg: 'voted' })
+	} catch (ex) {
+		logError('/room/vote', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
 	}
-
-	return res.json({ msg: 'voted' })
-
 })
 app.post('/room/claim-host', (req, res) => {
+	try {
+		const { roomId, userId, password } = req.body;
 
-	const { roomId, userId, password } = req.body;
+		if (password != "123") return res.status(400).json({ msg: 'wrong password' });
 
-	if (password != "123") return res.status(400).json({ msg: 'wrong password' });
+		if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room ' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room ' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
+		if (userInRoomIndex == -1) return res.status(400).json({ msg: 'user is not in this room' });
 
-	var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
-	if (userInRoomIndex == -1) return res.status(400).json({ msg: 'user is not in this room' });
+		if (userInRoomIndex == 0) return res.status(400).json({ msg: 'already host' });
 
-	if (userInRoomIndex == 0) return res.status(400).json({ msg: 'already host' });
+		var updatedUsers = room.users;
+		var me = updatedUsers.splice(userInRoomIndex, 1);
+		updatedUsers = [
+			...me,
+			...updatedUsers
+		]
 
-	var updatedUsers = room.users;
-	var me = updatedUsers.splice(userInRoomIndex, 1);
-	updatedUsers = [
-		...me,
-		...updatedUsers
-	]
+		db.collection('rooms').doc(roomId).update({ users: updatedUsers })
 
-	db.collection('rooms').doc(roomId).update({ users: updatedUsers })
-
-	return res.json({ msg: 'claimed host' })
-
+		return res.json({ msg: 'claimed host' })
+	} catch (ex) {
+		logError('/room/claim-host', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 })
 app.post('/room/reset', (req, res) => {
+	try {
+		const { roomId, userId, password } = req.body;
 
-	const { roomId, userId, password } = req.body;
+		if (password != "123") return res.status(400).json({ msg: 'wrong password' });
 
-	if (password != "123") return res.status(400).json({ msg: 'wrong password' });
+		if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room ' });
 
-	if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room ' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == roomId);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == roomId);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
+		if (userInRoomIndex != 0) return res.status(400).json({ msg: 'user is not host' });
 
-	var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
-	if (userInRoomIndex != 0) return res.status(400).json({ msg: 'user is not host' });
+		var updatedUsers = room.users.map(u => {
+			return {
+				...u,
+				score: 0
+			}
+		});
 
-	var updatedUsers = room.users.map(u => {
-		return {
-			...u,
-			score: 0
-		}
-	});
+		db.collection('rooms').doc(roomId).update({ users: updatedUsers, step: 0, round: 0 })
 
-	db.collection('rooms').doc(roomId).update({ users: updatedUsers, step: 0, round: 0 })
-
-	return res.json({ msg: 'reset ok' })
-
+		return res.json({ msg: 'reset ok' })
+	}
+	catch (ex) {
+		logError('/room/reset', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 })
 app.put('/room', (req, res) => {
+	try {
+		var { id, userId, maxTimeStep1, maxTimeStep2, maxTimeStep3 } = req.body;
 
-	const { id, userId, maxTimeStep1, maxTimeStep2, maxTimeStep3 } = req.body;
+		if (!id || !userId) return res.status(400).json({ msg: 'missing user or room ' });
 
-	if (!id || !userId) return res.status(400).json({ msg: 'missing user or room ' });
+		const user = users.find(u => u.id == userId);
+		if (!user) return res.status(400).json({ msg: 'user not found' });
 
-	const user = users.find(u => u.id == userId);
-	if (!user) return res.status(400).json({ msg: 'user not found' });
+		const room = rooms.find(r => r.id == id);
+		if (!room) return res.status(400).json({ msg: 'room not found' });
 
-	const room = rooms.find(r => r.id == id);
-	if (!room) return res.status(400).json({ msg: 'room not found' });
+		var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
+		if (userInRoomIndex == -1) return res.status(400).json({ msg: 'user is not in this room' });
 
-	var userInRoomIndex = room.users.findIndex(u => u.hash == md5(userId));
-	if (userInRoomIndex == -1) return res.status(400).json({ msg: 'user is not in this room' });
+		if (userInRoomIndex != 0) return res.status(400).json({ msg: 'not host (insufficient permissions)' });
 
-	if (userInRoomIndex != 0) return res.status(400).json({ msg: 'not host (insufficient permissions)' });
+		if (maxTimeStep1 < 5 || maxTimeStep1 > 999) return res.status(400).json({ msg: 'Tempo inváido para escrever definição' });
+		if (maxTimeStep2 < 5 || maxTimeStep2 > 999) return res.status(400).json({ msg: 'Tempo inváido para votar definição' });
+		if (maxTimeStep3 < 5 || maxTimeStep3 > 999) return res.status(400).json({ msg: 'Tempo inváido para ver pontos' });
 
-	db.collection('rooms').doc(id).update({ maxTimeStep1, maxTimeStep2, maxTimeStep3 })
+		db.collection('rooms').doc(id).update({ maxTimeStep1, maxTimeStep2, maxTimeStep3 })
 
-	return res.json({ msg: 'updated' })
+		return res.json({ msg: 'updated' })
+
+	}
+	catch (ex) {
+		logError('put /room', ex)
+		return res.status(500).json({ msg: 'Erro no servidor' });
+	}
 
 })
 var port = process.env.PORT || 3000;
@@ -532,7 +569,7 @@ setInterval(() => {
 		}
 	}
 	catch (ex) {
-		console.error(ex)
+		logError('Steps Routine', ex)
 	}
 
 }, 1000);
@@ -543,38 +580,48 @@ setInterval(() => {
 setInterval(() => {
 
 	for (let room of rooms) {
+		try {
+			const INACTIVE_TIME = new Date().getTime() - (1000 * 60 * 5);
+			const KICK_TIME = INACTIVE_TIME - (1000 * 60 * 2);
 
-		const INACTIVE_TIME = new Date().getTime() - (1000 * 60 * 5);
-		const KICK_TIME = INACTIVE_TIME - (1000 * 60 * 2);
-
-		// Se a sala está vazia, é deletada
-		if (room.users.length <= 0) {
-			db.collection('rooms').doc(room.id).delete();
-		}
-
-		// Se user está sem mover há mais de 45 segs é considerado inativo
-		var hasChanges = false;
-		const modifiedRoomUsers = room.users.map(u => {
-
-			if (u.lastMoveAt.toDate().getTime() <= INACTIVE_TIME) {
-				hasChanges = true;
-				return { ...u, inactive: true }
+			// Se a sala está vazia, é deletada
+			if (room.users.length <= 0) {
+				db.collection('rooms').doc(room.id).delete();
 			}
 
-			return u;
-		})
-		if (hasChanges) db.collection('rooms').doc(room.id).update({ users: modifiedRoomUsers });
+			// Se user está sem mover há mais de 45 segs é considerado inativo
+			var hasChanges = false;
+			const modifiedRoomUsers = room.users.map(u => {
+
+				if (u.lastMoveAt.toDate().getTime() <= INACTIVE_TIME) {
+					hasChanges = true;
+					return { ...u, inactive: true }
+				}
+
+				return u;
+			})
+			if (hasChanges) db.collection('rooms').doc(room.id).update({ users: modifiedRoomUsers });
 
 
-		// Se user está sem mover há mais de 2 minutos é removido
-		const filteredRoomUsers = room.users.filter(u => u.lastMoveAt.toDate().getTime() > KICK_TIME)
-		if (filteredRoomUsers.length != room.users.length) db.collection('rooms').doc(room.id).update({ users: filteredRoomUsers });
-
+			// Se user está sem mover há mais de 2 minutos é removido
+			const filteredRoomUsers = room.users.filter(u => u.lastMoveAt.toDate().getTime() > KICK_TIME)
+			if (filteredRoomUsers.length != room.users.length) db.collection('rooms').doc(room.id).update({ users: filteredRoomUsers });
+		} catch (ex) {
+			logError('Inactive Users Routine', ex)
+		}
 	}
 }, 1000 * 60 * 1)
 //#endregion
 
 //#region Common Functions
+function logError(endpoint, errorObject) {
+	console.error(endpoint, errorObject);
+	db.collection('errorLogs').doc(new Date().toISOString()).set({
+		endpoint,
+		errorObject,
+		datetime: admin.firestore.Timestamp.now()
+	})
+}
 function getRandomWord() {
 	var sectionWords = pt_BR_words.slice(0, 20);
 	for (let word of sectionWords) {

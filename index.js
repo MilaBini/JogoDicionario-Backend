@@ -115,7 +115,6 @@ app.post('/room/start', async (req, res) => {
 				votedUserName: ''
 			}
 		})
-
 		await db.collection('rooms').doc(roomId).update({
 			step: 1,
 			stepEndAt: new Date(new Date().getTime() + (1000 * room.maxTimeStep1)),
@@ -132,6 +131,7 @@ app.post('/room/start', async (req, res) => {
 })
 app.post('/room/enter', (req, res) => {
 	try {
+
 		const { roomId, userId } = req.body;
 
 		if (!roomId || !userId) return res.status(400).json({ msg: 'missing user or room' });
@@ -473,8 +473,9 @@ app.listen(port, () => {
 //#region Steps Routine (every second)
 
 setInterval(() => {
-	try {
-		for (let room of rooms) {
+
+	for (let room of rooms) {
+		try {
 			const NOT_ENOUGH_PLAYERS = room.users.length <= 1 && room.step != 0
 			if (NOT_ENOUGH_PLAYERS) {
 				db.collection('rooms').doc(room.id).update({
@@ -565,12 +566,12 @@ setInterval(() => {
 				stepEndAt: new Date(new Date().getTime() + (1000 * SECONDS_TO_ADD)),
 				round: nextRound
 			})
-
+		}
+		catch (ex) {
+			logError('Steps Routine - Room ' + room.name, ex)
 		}
 	}
-	catch (ex) {
-		logError('Steps Routine', ex)
-	}
+
 
 }, 1000);
 
@@ -607,7 +608,7 @@ setInterval(() => {
 			const filteredRoomUsers = room.users.filter(u => u.lastMoveAt.toDate().getTime() > KICK_TIME)
 			if (filteredRoomUsers.length != room.users.length) db.collection('rooms').doc(room.id).update({ users: filteredRoomUsers });
 		} catch (ex) {
-			logError('Inactive Users Routine', ex)
+			logError('Inactive Users Routine - Room ' + room.name, ex)
 		}
 	}
 }, 1000 * 60 * 1)
@@ -616,9 +617,9 @@ setInterval(() => {
 //#region Common Functions
 function logError(endpoint, errorObject) {
 	console.error(endpoint, errorObject);
-	db.collection('errorLogs').doc(new Date().toISOString()).set({
+	db.collection('error_logs').doc(new Date().toISOString()).set({
 		endpoint,
-		errorObject,
+		errorMsg: errorObject.toString(),
 		datetime: admin.firestore.Timestamp.now()
 	})
 }
